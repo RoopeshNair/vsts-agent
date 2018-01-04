@@ -1,4 +1,5 @@
 using Microsoft.TeamFoundation.Build.WebApi;
+using Microsoft.TeamFoundation.DistributedTask.ServiceEndpoints;
 using Microsoft.TeamFoundation.DistributedTask.WebApi;
 using Microsoft.VisualStudio.Services.Agent.Util;
 using System;
@@ -19,20 +20,42 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
 
         public override IStep GetExtensionPreJobStep(IExecutionContext jobContext)
         {
-            return new JobExtensionRunner(
-                context: jobContext.CreateChild(Guid.NewGuid(), StringUtil.Loc("GetSources"), nameof(BuildJobExtension)),
-                runAsync: GetSourceAsync,
-                condition: ExpressionManager.Succeeded,
-                displayName: StringUtil.Loc("GetSources"));
+            Dictionary<string, string> data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var extensionManager = HostContext.GetService<IExtensionManager>();
+            List<ISourceProvider> sourceProviders = extensionManager.GetExtensions<ISourceProvider>();
+            ServiceEndpoint ep = jobContext.Endpoints.FirstOrDefault(e => e.Data.ContainsKey("repositoryId"));
+
+            data["type"] = ep.Type;
+            data["url"] = ep.Url.AbsoluteUri;
+
+            foreach (var epData in ep.Data)
+            {
+                data[epData.Key] = epData.Value;
+            }
+
+            IStep extensionStep = new JobExtensionRunner(data: data, runAsync: GetSourceAsync, condition: ExpressionManager.Succeeded, displayName: StringUtil.Loc("GetSources"));
+
+            return extensionStep;
         }
 
         public override IStep GetExtensionPostJobStep(IExecutionContext jobContext)
         {
-            return new JobExtensionRunner(
-                context: jobContext.CreateChild(Guid.NewGuid(), StringUtil.Loc("Cleanup"), nameof(BuildJobExtension)),
-                runAsync: PostJobCleanupAsync,
-                condition: ExpressionManager.Always,
-                displayName: StringUtil.Loc("Cleanup"));
+            Dictionary<string, string> data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var extensionManager = HostContext.GetService<IExtensionManager>();
+            List<ISourceProvider> sourceProviders = extensionManager.GetExtensions<ISourceProvider>();
+            ServiceEndpoint ep = jobContext.Endpoints.FirstOrDefault(e => e.Data.ContainsKey("repositoryId"));
+
+            data["type"] = ep.Type;
+            data["url"] = ep.Url.AbsoluteUri;
+
+            foreach (var epData in ep.Data)
+            {
+                data[epData.Key] = epData.Value;
+            }
+
+            IStep extensionStep = new JobExtensionRunner(data: data, runAsync: PostJobCleanupAsync, condition: ExpressionManager.Always, displayName: StringUtil.Loc("Cleanup"));
+
+            return extensionStep;
         }
 
         // 1. use source provide to solve path, if solved result is rooted, return full path.
@@ -191,7 +214,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
             SourceProvider.SetVariablesInEndpoint(executionContext, SourceEndpoint);
         }
 
-        private async Task GetSourceAsync(IExecutionContext executionContext)
+        private async Task GetSourceAsync(IExecutionContext executionContext, Dictionary<string, string> data)
         {
             // Validate args.
             Trace.Entering();
@@ -208,7 +231,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
             ArgUtil.NotNull(SourceEndpoint, nameof(SourceEndpoint));
             ArgUtil.NotNull(SourceProvider, nameof(SourceProvider));
 
-            // Read skipSyncSource property fron endpoint data
+            // Read skipSyncSource property from endpoint data
             string skipSyncSourceText;
             bool skipSyncSource = false;
             if (SourceEndpoint.Data.TryGetValue("skipSyncSource", out skipSyncSourceText))
@@ -230,7 +253,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
             }
         }
 
-        private async Task PostJobCleanupAsync(IExecutionContext executionContext)
+        private async Task PostJobCleanupAsync(IExecutionContext executionContext, Dictionary<string, string> data)
         {
             // Validate args.
             Trace.Entering();
@@ -246,7 +269,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
             ArgUtil.NotNull(SourceEndpoint, nameof(SourceEndpoint));
             ArgUtil.NotNull(SourceProvider, nameof(SourceProvider));
 
-            // Read skipSyncSource property fron endpoint data
+            // Read skipSyncSource property from endpoint data
             string skipSyncSourceText;
             bool skipSyncSource = false;
             if (SourceEndpoint != null && SourceEndpoint.Data.TryGetValue("skipSyncSource", out skipSyncSourceText))
